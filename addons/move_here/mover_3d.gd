@@ -4,7 +4,6 @@ extends EditorPlugin
 const SETTING_PATH = "addons/move_here/modifier_key"
 const DEFAULT_MODIFIER = 1 # 0: Alt, 1: Ctrl, 2: Shift, 3: Space
 
-# Updated Enum to include Space
 enum Modifier { ALT = 0, CTRL = 1, SHIFT = 2, SPACE = 3 }
 
 func _enter_tree():
@@ -16,7 +15,6 @@ func _enter_tree():
 		"name": SETTING_PATH,
 		"type": TYPE_INT,
 		"hint": PROPERTY_HINT_ENUM,
-		# Added Space to the dropdown list
 		"hint_string": "Alt,Ctrl,Shift,Space"
 	}
 	settings.add_property_info(property_info)
@@ -39,8 +37,6 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 	var modifier_setting = settings.get_setting(SETTING_PATH)
 	
 	var is_match = false
-	
-	# Check based on setting
 	match modifier_setting:
 		Modifier.ALT: is_match = event.alt_pressed
 		Modifier.CTRL: is_match = event.ctrl_pressed
@@ -48,7 +44,6 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 		Modifier.SPACE: is_match = Input.is_key_pressed(KEY_SPACE)
 		_: is_match = event.ctrl_pressed
 
-	# Strict check to prevent conflicts
 	if is_match:
 		var alt = event.alt_pressed
 		var ctrl = event.ctrl_pressed
@@ -81,21 +76,30 @@ func _move_selected_nodes_3d(camera: Camera3D, event: InputEventMouseButton) -> 
 	var dir = camera.project_ray_normal(event.position)
 	var to = from + dir * 10000.0
 	
-	var space_state = camera.get_world_3d().direct_space_state
-	var query = PhysicsRayQueryParameters3D.create(from, to)
+	# --- FIX START ---
+	# Safely get the space state from the editor viewport's world
+	var world = camera.get_world_3d()
+	if world and world.direct_space_state:
+		var space_state = world.direct_space_state
+		
+		var query = PhysicsRayQueryParameters3D.create(from, to)
+		
+		var rid_excludes = []
+		for node in selection:
+			if node is CollisionObject3D:
+				rid_excludes.append(node.get_rid())
+		query.exclude = rid_excludes
+		
+		# We check if intersect_ray returns a dictionary (it might be empty)
+		var result = space_state.intersect_ray(query)
+		
+		if not result.is_empty():
+			target_position = result.position
+			hit_found = true
+	# --- FIX END ---
 	
-	var rid_excludes = []
-	for node in selection:
-		if node is CollisionObject3D:
-			rid_excludes.append(node.get_rid())
-	query.exclude = rid_excludes
-	
-	var result = space_state.intersect_ray(query)
-	
-	if not result.is_empty():
-		target_position = result.position
-		hit_found = true
-	else:
+	# Fallback if physics failed or hit nothing
+	if not hit_found:
 		var plane = Plane(Vector3.UP, 0)
 		var intersection = plane.intersects_ray(from, dir)
 		if intersection:
